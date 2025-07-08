@@ -1,7 +1,7 @@
 use serde::ser::StdError;
-use std::result;
+use std::{fmt, result};
 
-use tokenizers::{AddedToken, Tokenizer};
+use tokenizers::AddedToken;
 
 pub type Result<T> = result::Result<T, Box<(dyn StdError + Send + Sync + 'static)>>;
 
@@ -11,8 +11,8 @@ pub struct Gpt2Tokenizer {
 
 impl Gpt2Tokenizer {
     pub fn new(model_name: &str) -> Result<Self> {
-        let mut tokenizer =
-            tokenizers::Tokenizer::from_file(&format!("models/{}/tokenizer.json", &model_name))?;
+        let tokenizer =
+            tokenizers::Tokenizer::from_file(format!("models/{}/tokenizer.json", &model_name))?;
 
         Ok(Self { tokenizer })
     }
@@ -278,27 +278,27 @@ pub enum SpecialToken {
     Timestamp(f64),
 }
 
-impl ToString for SpecialToken {
-    fn to_string(&self) -> String {
+impl fmt::Display for SpecialToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SpecialToken::EndofText => "<|endoftext|>".into(),
-            SpecialToken::StartofTranscript => "<|startoftranscript|>".into(),
-            SpecialToken::Translate => "<|translate|>".into(),
-            SpecialToken::Transcribe => "<|transcribe|>".into(),
-            SpecialToken::StartofLM => "<|startoflm|>".into(),
-            SpecialToken::StartofPrev => "<|startofprev|>".into(),
-            SpecialToken::NoSpeech => "<|nospeech|>".into(),
-            SpecialToken::NoTimeStamps => "<|notimestamps|>".into(),
-            SpecialToken::Language(lang) => format!("<|{}|>", lang.as_str()),
-            SpecialToken::Timestamp(val) => format!("<|{:.2}|>", val),
+            SpecialToken::EndofText => write!(f, "<|endoftext|>"),
+            SpecialToken::StartofTranscript => write!(f, "<|startoftranscript|>"),
+            SpecialToken::Translate => write!(f, "<|translate|>"),
+            SpecialToken::Transcribe => write!(f, "<|transcribe|>"),
+            SpecialToken::StartofLM => write!(f, "<|startoflm|>"),
+            SpecialToken::StartofPrev => write!(f, "<|startofprev|>"),
+            SpecialToken::NoSpeech => write!(f, "<|nospeech|>"),
+            SpecialToken::NoTimeStamps => write!(f, "<|notimestamps|>"),
+            SpecialToken::Language(lang) => write!(f, "<|{}|>", lang.as_str()),
+            SpecialToken::Timestamp(val) => write!(f, "<|{val:.2}|>"),
         }
     }
 }
 
-fn construct_special_tokens() -> Vec<AddedToken> {
+fn _construct_special_tokens() -> Vec<AddedToken> {
     const SPEC1: [&str; 2] = ["<|endoftext|>", "<|startoftranscript|>"];
 
-    let lang_keys = LANGUAGES.iter().map(|lang| format!("<|{}|>", lang));
+    let lang_keys = LANGUAGES.iter().map(|lang| format!("<|{lang}|>"));
 
     const SPEC2: [&str; 6] = [
         "<|translate|>",
@@ -310,16 +310,15 @@ fn construct_special_tokens() -> Vec<AddedToken> {
     ];
 
     let range_keys = (0..1501)
-        .into_iter()
         .map(|i| i as f64 * 0.02)
-        .map(|f| format!("<|{:.2}|>", f));
+        .map(|f| format!("<|{f:.2}|>"));
 
     SPEC1
         .into_iter()
         .map(String::from)
-        .chain(lang_keys.into_iter())
+        .chain(lang_keys)
         .chain(SPEC2.into_iter().map(String::from))
-        .chain(range_keys.into_iter())
+        .chain(range_keys)
         .map(|tok| AddedToken::from(tok, true))
         .collect()
 }

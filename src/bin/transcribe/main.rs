@@ -1,10 +1,6 @@
-use std::collections::HashMap;
-use std::iter;
-
-use whisper_stream::helper::*;
 use whisper_stream::model::*;
+use whisper_stream::token::Language;
 use whisper_stream::transcribe::waveform_to_text;
-use whisper_stream::{token, token::Language};
 
 use strum::IntoEnumIterator;
 
@@ -12,22 +8,17 @@ use burn::{
     backend::wgpu::{Wgpu, WgpuDevice},
     config::Config,
     module::Module,
-    record::{
-        DefaultRecorder, FullPrecisionSettings, NamedMpkFileRecorder, Recorder, RecorderError,
-    },
-    tensor::{self, backend::Backend, Data, Float, Int, Tensor},
+    record::{FullPrecisionSettings, NamedMpkFileRecorder, Recorder},
+    tensor::backend::Backend,
 };
-use num_traits::ToPrimitive;
-use whisper_stream::audio::prep_audio;
-use whisper_stream::token::{Gpt2Tokenizer, SpecialToken};
-use std::{env, fs, process};
 use hound::{self, SampleFormat};
+use std::{env, fs, process};
+use whisper_stream::token::Gpt2Tokenizer;
 
-fn load_audio_waveform<B: Backend>(filename: &str) -> hound::Result<(Vec<f32>, usize)> {
-    let mut reader = hound::WavReader::open(filename)?;
+fn load_audio_waveform(filename: &str) -> hound::Result<(Vec<f32>, usize)> {
+    let reader = hound::WavReader::open(filename)?;
     let spec = reader.spec();
 
-    let duration = reader.duration() as usize;
     let channels = spec.channels as usize;
     let sample_rate = spec.sample_rate as usize;
     let bits_per_sample = spec.bits_per_sample;
@@ -36,7 +27,7 @@ fn load_audio_waveform<B: Backend>(filename: &str) -> hound::Result<(Vec<f32>, u
     assert_eq!(sample_rate, 16000, "The audio sample rate must be 16k.");
     assert_eq!(channels, 1, "The audio must be single-channel.");
 
-    let max_int_val = 2_u32.pow(spec.bits_per_sample as u32 - 1) - 1;
+    let max_int_val = 2_u32.pow(bits_per_sample as u32 - 1) - 1;
 
     let floats = match sample_format {
         SampleFormat::Float => reader.into_samples::<f32>().collect::<hound::Result<_>>()?,
@@ -46,7 +37,7 @@ fn load_audio_waveform<B: Backend>(filename: &str) -> hound::Result<(Vec<f32>, u
             .collect::<hound::Result<_>>()?,
     };
 
-    return Ok((floats, sample_rate));
+    Ok((floats, sample_rate))
 }
 
 fn main() {
@@ -69,7 +60,7 @@ fn main() {
     let lang = match Language::iter().find(|lang| lang.as_str() == lang_str) {
         Some(lang) => lang,
         None => {
-            eprintln!("Invalid language abbreviation: {}", lang_str);
+            eprintln!("Invalid language abbreviation: {lang_str}");
             process::exit(1);
         }
     };
@@ -77,26 +68,26 @@ fn main() {
     let model_name = &args[1];
 
     println!("Loading waveform...");
-    let (waveform, sample_rate) = match load_audio_waveform::<Wgpu>(wav_file) {
+    let (waveform, sample_rate) = match load_audio_waveform(wav_file) {
         Ok((w, sr)) => (w, sr),
         Err(e) => {
-            eprintln!("Failed to load audio file: {}", e);
+            eprintln!("Failed to load audio file: {e}");
             process::exit(1);
         }
     };
 
-    let (bpe, whisper_config, whisper) = load_model::<Wgpu>(&model_name, &tensor_device);
+    let (bpe, _whisper_config, whisper) = load_model::<Wgpu>(model_name, &tensor_device);
 
-    let (text, tokens) = match waveform_to_text(&whisper, &bpe, lang, waveform, sample_rate, false) {
-        Ok((text, tokens)) => (text, tokens),
+    let text = match waveform_to_text(&whisper, &bpe, lang, waveform, sample_rate, false) {
+        Ok((text, _tokens)) => text,
         Err(e) => {
-            eprintln!("Error during transcription: {}", e);
+            eprintln!("Error during transcription: {e}");
             process::exit(1);
         }
     };
 
     fs::write(text_file, text).unwrap_or_else(|e| {
-        eprintln!("Error writing transcription file: {}", e);
+        eprintln!("Error writing transcription file: {e}");
         process::exit(1);
     });
 
@@ -110,16 +101,16 @@ fn load_model<B: Backend>(
     let bpe = match Gpt2Tokenizer::new(model_name) {
         Ok(bpe) => bpe,
         Err(e) => {
-            eprintln!("Failed to load tokenizer: {}", e);
+            eprintln!("Failed to load tokenizer: {e}, {model_name}");
             process::exit(1);
         }
     };
 
     let whisper_config =
-        match WhisperConfig::load(&format!("models/{}/{}.cfg", model_name, model_name)) {
+        match WhisperConfig::load(format!("models/{model_name}/{model_name}.cfg")) {
             Ok(config) => config,
             Err(e) => {
-                eprintln!("Failed to load whisper config: {}", e);
+                eprintln!("Failed to load whisper config: {e}");
                 process::exit(1);
             }
         };
@@ -128,20 +119,20 @@ fn load_model<B: Backend>(
     let whisper: Whisper<B> = {
         match NamedMpkFileRecorder::<FullPrecisionSettings>::new()
             .load(
-                format!("models/{}/{}", model_name, model_name).into(),
+                format!("models/{model_name}/{model_name}").into(),
                 tensor_device_ref,
             )
             .map(|record| whisper_config.init(tensor_device_ref).load_record(record))
         {
             Ok(whisper_model) => whisper_model,
             Err(e) => {
-                eprintln!("Failed to load whisper model file: {}", e);
+                eprintln!("Failed to load whisper model file: {e}");
                 process::exit(1);
             }
         }
     };
 
-    let whisper = whisper.to_device(&tensor_device_ref);
+    let whisper = whisper.to_device(tensor_device_ref);
 
     (bpe, whisper_config, whisper)
 }

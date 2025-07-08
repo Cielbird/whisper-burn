@@ -1,3 +1,4 @@
+#![allow(clippy::single_range_in_vec_init)]
 use burn::tensor::{activation::relu, backend::Backend, ElementConversion, Tensor};
 
 use crate::helper::*;
@@ -17,11 +18,7 @@ pub fn max_waveform_samples(n_frame_max: usize) -> usize {
 }
 
 fn is_odd(x: usize) -> bool {
-    if x % 2 == 0 {
-        false
-    } else {
-        true
-    }
+    x % 2 != 0
 }
 
 /// Transform an input waveform into a format interpretable by Whisper.
@@ -31,7 +28,11 @@ fn is_odd(x: usize) -> bool {
 /// n_samples_padded = if n_fft is even: n_samples + n_fft else: n_samples + n_fft - 1,
 /// n_fft = 400,
 /// hop_length = 160.
-pub fn prep_audio<B: Backend>(waveform: Tensor<B, 2>, sample_rate: f64, n_mels: usize) -> Tensor<B, 3> {
+pub fn prep_audio<B: Backend>(
+    waveform: Tensor<B, 2>,
+    sample_rate: f64,
+    n_mels: usize,
+) -> Tensor<B, 3> {
     let device = waveform.device();
 
     let window = hann_window_device(WINDOW_LENGTH, &device);
@@ -50,18 +51,9 @@ pub fn prep_audio<B: Backend>(waveform: Tensor<B, 2>, sample_rate: f64, n_mels: 
     let max: f64 = log_spec.clone().max().into_scalar().elem();
 
     let log_spec = tensor_max_scalar(log_spec, max - 8.0);
-    let log_spec = (log_spec + 4.0) / 4.0;
+    
 
-    return log_spec;
-}
-
-fn get_mel_filters<B: Backend>(
-    sample_rate: f64,
-    n_fft: usize,
-    n_mels: usize,
-    htk: bool,
-) -> Tensor<B, 2> {
-    get_mel_filters_device(sample_rate, n_fft, n_mels, htk, &B::Device::default())
+    (log_spec + 4.0) / 4.0
 }
 
 fn get_mel_filters_device<B: Backend>(
@@ -92,7 +84,7 @@ fn get_mel_filters_device<B: Backend>(
         .clone()
         .unsqueeze::<2>()
         .transpose()
-        .repeat(1, n_ffefreqs)
+        .repeat(&[1, n_ffefreqs])
         - fftfreqs.unsqueeze();
 
     /*for i in range(n_mels):
@@ -139,11 +131,7 @@ fn get_mel_filters_device<B: Backend>(
         println!("Empty filters detected in mel frequency basis. \nSome channels will produce empty responses. \nTry increasing your sampling rate (and fmax) or reducing n_mels.");
     }
 
-    return weights;
-}
-
-fn fft_frequencies<B: Backend>(sample_rate: f64, n_fft: usize) -> Tensor<B, 1> {
-    fft_frequencies_device(sample_rate, n_fft, &B::Device::default())
+    weights
 }
 
 fn fft_frequencies_device<B: Backend>(
@@ -155,25 +143,6 @@ fn fft_frequencies_device<B: Backend>(
     Tensor::arange(0..(n_fft / 2 + 1) as i64, device)
         .float()
         .mul_scalar(sample_rate / n_fft as f64)
-}
-
-fn test_fft_frequencies<B: Backend>() {
-    let sr = 1000.0; // stating sample rate
-    let n_fft = 100; // stating the window size of fft
-    let fftfreqs = fft_frequencies::<B>(sr, n_fft);
-    println!("{:?}", fftfreqs);
-}
-
-fn test_mel_frequencies<B: Backend>(htk: bool) {
-    let n_mels = 128; // stating the number of Mel bands
-    let fmin = 0.0; // stating the lowest frequency
-    let fmax = 22050.0; // stating the highest frequency
-    let melfreqs = mel_frequencies::<B>(n_mels + 2, fmin, fmax, htk);
-    println!("{:?}", melfreqs);
-}
-
-fn mel_frequencies<B: Backend>(n_mels: usize, fmin: f64, fmax: f64, htk: bool) -> Tensor<B, 1> {
-    mel_frequencies_device(n_mels, fmin, fmax, htk, &B::Device::default())
 }
 
 fn mel_frequencies_device<B: Backend>(
@@ -222,13 +191,13 @@ fn hz_to_mel(freq: f64, htk: bool) -> f64 {
         # If we have scalar data, heck directly
         mels = min_log_mel + np.log(frequencies / min_log_hz) / logstep*/
 
-    let mel = if freq >= min_log_hz {
+    
+
+    if freq >= min_log_hz {
         min_log_mel + (freq / min_log_hz).ln() / logstep
     } else {
         (freq - f_min) / f_sp
-    };
-
-    return mel;
+    }
 }
 
 fn mel_to_hz_tensor<B: Backend>(mel: Tensor<B, 1>, htk: bool) -> Tensor<B, 1> {
@@ -255,8 +224,7 @@ fn mel_to_hz_tensor<B: Backend>(mel: Tensor<B, 1>, htk: bool) -> Tensor<B, 1> {
         freqs = min_log_hz * np.exp(logstep * (mels - min_log_mel))*/
 
     let log_t = mel.clone().greater_equal_elem(min_log_mel).float();
-    let freq = log_t.clone() * (((mel.clone() - min_log_mel) * logstep).exp() * min_log_hz)
-        + (-log_t + 1.0) * (mel * f_sp + f_min);
+    
 
     /*let freq = if mel >= min_log_mel {
         min_log_hz * (logstep * (mel - min_log_mel)).exp()
@@ -264,7 +232,8 @@ fn mel_to_hz_tensor<B: Backend>(mel: Tensor<B, 1>, htk: bool) -> Tensor<B, 1> {
         f_min + f_sp * mel
     };*/
 
-    return freq;
+    log_t.clone() * (((mel.clone() - min_log_mel) * logstep).exp() * min_log_hz)
+        + (-log_t + 1.0) * (mel * f_sp + f_min)
 }
 
 pub fn hann_window<B: Backend>(window_length: usize) -> Tensor<B, 1> {
@@ -338,7 +307,6 @@ pub fn stfft<B: Backend>(
         .reshape([n_batch, n_hops, hop_length])
         .transpose();
     let parts: Vec<_> = (0..num_parts)
-        .into_iter()
         .map(|i| {
             template
                 .clone()
@@ -354,7 +322,7 @@ pub fn stfft<B: Backend>(
         .mul_scalar(coe)
         .unsqueeze::<2>()
         .transpose()
-        .repeat(1, n_fft)
+        .repeat(&[1, n_fft])
         * Tensor::arange(0..n_fft as i64, &device)
             .float()
             .unsqueeze::<2>();
@@ -367,9 +335,9 @@ pub fn stfft<B: Backend>(
         .unsqueeze()
         .matmul(input_windows);
 
-    return (real_part, imaginary_part);
+    (real_part, imaginary_part)
 }
 
 fn div_roundup(a: usize, b: usize) -> usize {
-    (a + b - 1) / b
+    a.div_ceil(b)
 }

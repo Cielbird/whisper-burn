@@ -5,35 +5,37 @@ use burn::{
         conv::{Conv1d, Conv1dConfig, Conv1dRecord},
         PaddingConfig1d,
     },
-    tensor::{activation::relu, backend::Backend, Bool, Device, Int, Tensor},
+    tensor::{backend::Backend, cast::ToElement, Tensor, TensorData},
 };
 
 use super::*;
 
 use burn::tensor::Shape;
 use npy::{self, NpyData};
-use num_traits::cast::ToPrimitive;
 use std::error::Error;
 use std::io::Read;
 
 fn numpy_to_tensor<B: Backend, const D: usize>(numpy_data: NpyData<f32>) -> Tensor<B, D> {
     let v = numpy_data.to_vec();
-    let shape: Shape<D> = v[0..D]
-        .into_iter()
+    let shape: Shape = v[0..D]
+        .iter()
         .map(|&v| v as usize)
         .collect::<Vec<_>>()
         .into();
 
-    let tensor_device_ref = Default::default(); //WgpuDevice::BestAvailable;
+    let tensor_device_ref = Default::default();
 
-    Tensor::from_floats(&v[D..], &tensor_device_ref).reshape(shape)
+    Tensor::<B, D>::from_floats(
+        TensorData::new(v[D..].to_vec(), shape).convert::<f32>(),
+        &tensor_device_ref,
+    )
 }
 
 fn load_tensor<B: Backend, const D: usize>(
     name: &str,
     path: &str,
 ) -> Result<Tensor<B, D>, Box<dyn Error>> {
-    let tensor_path = format!("{}/{}.npy", path, name);
+    let tensor_path = format!("{path}/{name}.npy");
 
     let mut buf = vec![];
     std::fs::File::open(tensor_path)?.read_to_end(&mut buf)?;
@@ -46,11 +48,11 @@ fn load_tensor<B: Backend, const D: usize>(
 }
 
 fn load_f32<B: Backend>(name: &str, path: &str) -> Result<f32, Box<dyn Error>> {
-    load_tensor::<B, 1>(name, path).map(|t| t.into_scalar().to_f32().unwrap())
+    load_tensor::<B, 1>(name, path).map(|t| t.into_scalar().to_f32())
 }
 
 fn load_usize<B: Backend>(name: &str, path: &str) -> Result<usize, Box<dyn Error>> {
-    load_tensor::<B, 1>(name, path).map(|t| t.into_scalar().to_usize().unwrap())
+    load_tensor::<B, 1>(name, path).map(|t| t.into_scalar().to_usize())
 }
 
 fn load_linear<B: Backend>(path: &str) -> Result<nn::Linear<B>, Box<dyn Error>> {
@@ -101,11 +103,11 @@ fn load_multihead_self_attention<B: Backend>(
 
     // Initializing attention block
     let attention_block = MultiHeadSelfAttention {
-        n_head: n_head,
-        query: query,
-        key: key,
-        value: value,
-        out: out,
+        n_head,
+        query,
+        key,
+        value,
+        out,
     };
 
     Ok(attention_block)
@@ -123,11 +125,11 @@ fn load_multihead_cross_attention<B: Backend>(
 
     // Initializing attention block
     let attention_block = MultiHeadCrossAttention {
-        n_head: n_head,
-        query: query,
-        key: key,
-        value: value,
-        out: out,
+        n_head,
+        query,
+        key,
+        value,
+        out,
     };
 
     Ok(attention_block)
@@ -140,9 +142,9 @@ fn load_mlp<B: Backend>(path: &str) -> Result<MLP<B>, Box<dyn Error>> {
     let gelu = nn::Gelu::new();
 
     let mlp = MLP {
-        lin1: lin1,
-        lin2: lin2,
-        gelu: gelu,
+        lin1,
+        lin2,
+        gelu,
     };
 
     Ok(mlp)
@@ -154,7 +156,7 @@ fn load_conv1d<B: Backend>(path: &str, config: Conv1dConfig) -> Result<Conv1d<B>
     let tensor_device_ref = weight.device();
 
     let record = Conv1dRecord {
-        weight: weight,
+        weight,
         bias: Some(bias),
         stride: <usize as Module<B>>::into_record(1),
         kernel_size: <usize as Module<B>>::into_record(1),
@@ -176,10 +178,10 @@ fn load_residual_encoder_attention_block<B: Backend>(
     let mlp_ln = load_layer_norm(&format!("{}/{}", path, "mlp_ln"))?;
 
     let residual_block = ResidualEncoderAttentionBlock {
-        attn: attn,
-        attn_ln: attn_ln,
-        mlp: mlp,
-        mlp_ln: mlp_ln,
+        attn,
+        attn_ln,
+        mlp,
+        mlp_ln,
     };
 
     Ok(residual_block)
@@ -196,12 +198,12 @@ fn load_residual_decoder_attention_block<B: Backend>(
     let mlp_ln = load_layer_norm(&format!("{}/{}", path, "mlp_ln"))?;
 
     let residual_block = ResidualDecoderAttentionBlock {
-        attn: attn,
-        attn_ln: attn_ln,
-        cross_attn: cross_attn,
-        cross_attn_ln: cross_attn_ln,
-        mlp: mlp,
-        mlp_ln: mlp_ln,
+        attn,
+        attn_ln,
+        cross_attn,
+        cross_attn_ln,
+        mlp,
+        mlp_ln,
     };
 
     Ok(residual_block)
@@ -225,7 +227,7 @@ fn load_audio_encoder<B: Backend>(
     let n_layer = load_usize::<B>("n_layer", path)?;
 
     let blocks: Vec<ResidualEncoderAttentionBlock<B>> = (0..n_layer)
-        .map(|i| load_residual_encoder_attention_block(&format!("{}/block_{}", path, i)))
+        .map(|i| load_residual_encoder_attention_block(&format!("{path}/block_{i}")))
         .collect::<Result<_, _>>()?;
 
     let ln_post = load_layer_norm(&format!("{}/{}", path, "ln_post"))?;
@@ -237,21 +239,21 @@ fn load_audio_encoder<B: Backend>(
     let n_head = blocks[0].attn.n_head;
 
     let audio_encoder = AudioEncoder {
-        conv1: conv1,
+        conv1,
         gelu1: nn::Gelu::new(),
-        conv2: conv2,
+        conv2,
         gelu2: nn::Gelu::new(),
-        blocks: blocks,
-        ln_post: ln_post,
-        positional_embedding: positional_embedding,
-        n_audio_ctx: n_audio_ctx,
-        n_mels: n_mels,
+        blocks,
+        ln_post,
+        positional_embedding,
+        n_audio_ctx,
+        n_mels,
     };
 
     let config = AudioEncoderConfig {
-        n_mels: n_mels,
-        n_audio_ctx: n_audio_ctx,
-        n_audio_state: n_audio_state,
+        n_mels,
+        n_audio_ctx,
+        n_audio_state,
         n_audio_head: n_head,
         n_audio_layer: n_layer,
     };
@@ -268,7 +270,7 @@ fn load_text_decoder<B: Backend>(
 
     let n_layer = load_usize::<B>("n_layer", path)?;
     let blocks: Vec<ResidualDecoderAttentionBlock<B>> = (0..n_layer)
-        .map(|i| load_residual_decoder_attention_block(&format!("{}/block_{}", path, i)))
+        .map(|i| load_residual_decoder_attention_block(&format!("{path}/block_{i}")))
         .collect::<Result<_, _>>()?;
 
     let n_text_head = blocks[0].attn.n_head;
@@ -284,18 +286,18 @@ fn load_text_decoder<B: Backend>(
     let text_decoder = TextDecoder {
         token_embedding: Param::from_tensor(token_embedding),
         positional_embedding: Param::from_tensor(positional_embedding),
-        blocks: blocks,
-        ln: ln,
+        blocks,
+        ln,
         mask: Param::from_tensor(mask),
-        n_text_ctx: n_text_ctx,
-        n_vocab: n_vocab,
+        n_text_ctx,
+        n_vocab,
     };
 
     let config = TextDecoderConfig {
-        n_vocab: n_vocab,
-        n_text_ctx: n_text_ctx,
-        n_text_state: n_text_state,
-        n_text_head: n_text_head,
+        n_vocab,
+        n_text_ctx,
+        n_text_state,
+        n_text_head,
         n_text_layer: n_layer,
     };
 
@@ -306,8 +308,8 @@ pub fn load_whisper<B: Backend>(path: &str) -> Result<(Whisper<B>, WhisperConfig
     let (encoder, encoder_config) = load_audio_encoder(&format!("{}/{}", path, "encoder"))?;
     let (decoder, decoder_config) = load_text_decoder(&format!("{}/{}", path, "decoder"))?;
     let whisper = Whisper {
-        encoder: encoder,
-        decoder: decoder,
+        encoder,
+        decoder,
     };
 
     let config = WhisperConfig {
