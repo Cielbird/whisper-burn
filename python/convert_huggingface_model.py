@@ -1,5 +1,6 @@
 import sys
 
+# pip install git+https://github.com/bayartsogt-ya/whisper-multiple-hf-datasets.git
 from multiple_datasets.hub_default_utils import convert_hf_whisper 
 
 if len(sys.argv) != 3:

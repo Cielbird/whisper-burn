@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use whisper_stream::model::*;
 use whisper_stream::token::Language;
 use whisper_stream::transcribe::waveform_to_text;

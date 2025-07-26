@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use whisper_stream::model::{load::*, *};
 
 use burn::{

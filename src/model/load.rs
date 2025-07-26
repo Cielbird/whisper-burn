@@ -11,12 +11,13 @@ use burn::{
 use super::*;
 
 use burn::tensor::Shape;
-use npy::{self, NpyData};
-use std::error::Error;
-use std::io::Read;
+use npyz::{self, NpyFile, NpyReader};
+use std::{error::Error, fs::File};
 
-fn numpy_to_tensor<B: Backend, const D: usize>(numpy_data: NpyData<f32>) -> Tensor<B, D> {
-    let v = numpy_data.to_vec();
+// TODO put in Burn
+fn numpy_to_tensor<B: Backend, const D: usize>(numpy_data: NpyReader<f32, File>) -> Tensor<B, D> {
+    let v = numpy_data.map(|x| x.unwrap()).collect::<Vec<f32>>();
+
     let shape: Shape = v[0..D]
         .iter()
         .map(|&v| v as usize)
@@ -36,13 +37,11 @@ fn load_tensor<B: Backend, const D: usize>(
     path: &str,
 ) -> Result<Tensor<B, D>, Box<dyn Error>> {
     let tensor_path = format!("{path}/{name}.npy");
+    let file = std::fs::File::open(tensor_path)?;
 
-    let mut buf = vec![];
-    std::fs::File::open(tensor_path)?.read_to_end(&mut buf)?;
+    let tensor_reader: NpyReader<f32, std::fs::File> = NpyFile::new(file)?.data()?;
 
-    let tensor_numpy: NpyData<f32> = NpyData::from_bytes(&buf)?;
-
-    let tensor = numpy_to_tensor(tensor_numpy);
+    let tensor = numpy_to_tensor(tensor_reader);
 
     Ok(tensor)
 }

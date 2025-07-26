@@ -16,7 +16,7 @@ tokenizers = {version = "0.13.3", default-features = false, features = [
   "onig",
   "http",
 ]}
-npy = "0.4.0"
+npyz = "0.8.4"
 cfg-if = "0.1"
 strum = "0.25.0"
 strum_macros = "0.25.0"
